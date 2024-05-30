@@ -2,7 +2,9 @@
 name = "axprocess"
 version = "0.1.0"
 edition = "2021"
-keywords = ["Starry"]
+keywords = ["Starry", "process"]
+description = "A process management library for Starry OS."
+authors = ["Youjie Zheng <zyj578335934@gmail.com>"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
