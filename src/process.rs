@@ -16,7 +16,7 @@ use axhal::KERNEL_PROCESS_ID;
 use axlog::{debug, error};
 use axmem::MemorySet;
 use axsync::Mutex;
-use axtask::{current, new_task, AxTaskRef, TaskId, RUN_QUEUE};
+use axtask::{current, new_task, AxTaskRef, TaskId, Processor};
 use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 
 use crate::fd_manager::FdManager;
@@ -289,7 +289,7 @@ impl Process {
                 return Err(AxError::NotFound);
             }
         }
-        RUN_QUEUE.lock().add_task(Arc::clone(&new_task));
+        Processor::first_add_task(Arc::clone(&new_task));
         Ok(new_task)
     }
 }
@@ -342,7 +342,7 @@ impl Process {
                 tasks.push(task);
             } else {
                 TID2TASK.lock().remove(&task.id().as_u64());
-                RUN_QUEUE.lock().remove_task(&task);
+                panic!("currently not support exec when has another task ");
             }
         }
         // 当前任务被设置为主线程
@@ -668,7 +668,7 @@ impl Process {
             // );
         }
         write_trapframe_to_kstack(new_task.get_kernel_stack_top().unwrap(), &trap_frame);
-        RUN_QUEUE.lock().add_task(new_task);
+        Processor::first_add_task(new_task);
         // 判断是否为VFORK
         if flags.contains(CloneFlags::CLONE_VFORK) {
             self.set_vfork_block(true);

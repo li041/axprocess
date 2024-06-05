@@ -19,7 +19,7 @@ use axmem::MemorySet;
 
 use axsignal::signal_no::SignalNo;
 use axsync::Mutex;
-use axtask::{current, yield_now, AxTaskRef, CurrentTask, TaskId, TaskState, IDLE_TASK, RUN_QUEUE};
+use axtask::{current, yield_now, AxTaskRef, CurrentTask, TaskId, TaskState,current_processor};
 use elf_parser::{
     get_app_stack_region, get_auxv_vector, get_elf_entry, get_elf_segments, get_relocate_pairs,
 };
@@ -43,9 +43,8 @@ pub fn init_kernel_process() {
     ));
 
     axtask::init_scheduler();
-    kernel_process.tasks.lock().push(Arc::clone(unsafe {
-        IDLE_TASK.current_ref_raw().get_unchecked()
-    }));
+    kernel_process.tasks.lock().push(Arc::clone(
+        current_processor().idle_task()));
     PID2PC.lock().insert(kernel_process.pid(), kernel_process);
 }
 
@@ -99,7 +98,6 @@ pub fn exit_current_task(exit_code: i32) -> ! {
     if current_task.is_leader() {
         loop {
             let mut all_exited = true;
-
             for task in process.tasks.lock().deref() {
                 if !task.is_leader() && task.state() != TaskState::Exited {
                     all_exited = false;
@@ -152,7 +150,7 @@ pub fn exit_current_task(exit_code: i32) -> ! {
         process.signal_modules.lock().remove(&curr_id);
         drop(process);
     }
-    RUN_QUEUE.lock().exit_current(exit_code);
+    axtask::exit(exit_code);
 }
 
 /// 返回应用程序入口，用户栈底，用户堆底

@@ -16,7 +16,6 @@ use axsignal::{
     SignalHandler, SignalSet,
 };
 use axsync::Mutex;
-use axtask::{TaskState, RUN_QUEUE};
 
 /// 信号处理模块，进程间不共享
 pub struct SignalModule {
@@ -314,8 +313,8 @@ pub fn send_signal_to_process(pid: isize, signum: isize) -> AxResult<()> {
         let tid2task = TID2TASK.lock();
         let main_task = Arc::clone(tid2task.get(&now_id.unwrap()).unwrap());
         // 如果这个时候对应的线程是处于休眠状态的，则唤醒之，进入信号处理阶段
-        if main_task.state() == TaskState::Blocked {
-            RUN_QUEUE.lock().unblock_task(main_task, false);
+        if main_task.is_blocked() {
+            axtask::wakeup_task(main_task);
         }
     }
     Ok(())
@@ -345,8 +344,8 @@ pub fn send_signal_to_thread(tid: isize, signum: isize) -> AxResult<()> {
     let signal_module = signal_modules.get_mut(&(tid as u64)).unwrap();
     signal_module.signal_set.try_add_signal(signum as usize);
     // 如果这个时候对应的线程是处于休眠状态的，则唤醒之，进入信号处理阶段
-    if task.state() == TaskState::Blocked {
-        RUN_QUEUE.lock().unblock_task(task, false);
+    if task.is_blocked() {
+        axtask::wakeup_task(task);
     }
     Ok(())
 }
