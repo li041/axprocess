@@ -20,6 +20,7 @@ pub struct Stdout {
 
 /// stderr file for putting chars to console
 pub struct Stderr {
+    #[allow(unused)]
     pub flags: Mutex<OpenFlags>,
 }
 

@@ -16,7 +16,7 @@ use axhal::KERNEL_PROCESS_ID;
 use axlog::{debug, error};
 use axmem::MemorySet;
 use axsync::Mutex;
-use axtask::{current, new_task, AxTaskRef, TaskId, Processor};
+use axtask::{current, new_task, AxTaskRef, Processor, TaskId};
 use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 
 use crate::fd_manager::FdManager;
@@ -251,6 +251,7 @@ impl Process {
                 })),
             ],
         ));
+        new_process.set_file_path(path.clone());
         let new_task = new_task(
             || {},
             path,
@@ -326,7 +327,7 @@ impl Process {
         axhal::arch::flush_tlb(None);
 
         // 关闭 `CLOEXEC` 的文件
-        // inner.fd_manager.close_on_exec();
+        self.fd_manager.close_on_exec();
         let current_task = current();
         // 再考虑手动结束其他所有的task
         let mut tasks = self.tasks.lock();
