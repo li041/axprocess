@@ -739,4 +739,19 @@ impl Process {
             .find_signal()
             .map_or_else(|| current_task.check_pending_signal(), Some)
     }
+
+    /// Judge whether the signal request the interrupted syscall to restart
+    ///
+    /// # Return
+    /// - None: There is no siganl need to be delivered
+    /// - Some(true): The interrupted syscall should be restarted
+    /// - Some(false): The interrupted syscall should not be restarted
+    pub fn have_restart_signals(&self) -> Option<bool> {
+        let current_task = current();
+        self.signal_modules
+            .lock()
+            .get(&current_task.id().as_u64())
+            .unwrap()
+            .have_restart_signal()
+    }
 }

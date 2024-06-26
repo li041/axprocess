@@ -19,7 +19,7 @@ use axmem::MemorySet;
 
 use axsignal::signal_no::SignalNo;
 use axsync::Mutex;
-use axtask::{current, yield_now, AxTaskRef, CurrentTask, TaskId, TaskState,current_processor};
+use axtask::{current, current_processor, yield_now, AxTaskRef, CurrentTask, TaskId, TaskState};
 use elf_parser::{
     get_app_stack_region, get_auxv_vector, get_elf_entry, get_elf_segments, get_relocate_pairs,
 };
@@ -43,8 +43,10 @@ pub fn init_kernel_process() {
     ));
 
     axtask::init_scheduler();
-    kernel_process.tasks.lock().push(Arc::clone(
-        current_processor().idle_task()));
+    kernel_process
+        .tasks
+        .lock()
+        .push(Arc::clone(current_processor().idle_task()));
     PID2PC.lock().insert(kernel_process.pid(), kernel_process);
 }
 

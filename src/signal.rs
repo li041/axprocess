@@ -44,6 +44,31 @@ impl SignalModule {
             signal_set,
         }
     }
+
+    /// Judge whether the signal request the interrupted syscall to restart
+    ///
+    /// # Return
+    /// - None: There is no siganl need to be delivered
+    /// - Some(true): The interrupted syscall should be restarted
+    /// - Some(false): The interrupted syscall should not be restarted
+    pub fn have_restart_signal(&self) -> Option<bool> {
+        match self.signal_set.find_signal() {
+            Some(sig_num) => match self.signal_handler.lock().get_action(sig_num) {
+                Some(action) => {
+                    if action.need_restart() {
+                        Some(true)
+                    } else {
+                        Some(false)
+                    }
+                }
+                None => {
+                    axlog::error!("No action for signal {}", sig_num);
+                    None
+                }
+            },
+            None => None,
+        }
+    }
 }
 
 const USER_SIGNAL_PROTECT: usize = 512;

@@ -42,6 +42,8 @@ bitflags! {
         const CLONE_UNTRACED = 1 << 23;
         /// 要求在子任务的一个地址写入子任务的 tid
         const CLONE_CHILD_SETTID = 1 << 24;
+        /// New pid namespace.
+        const CLONE_NEWPID = 1 << 29;
     }
 }
 
