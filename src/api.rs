@@ -190,7 +190,7 @@ pub fn load_app(
         args = [vec![real_interp_path.clone()], args].concat();
         return load_app(real_interp_path, args, envs, memory_set);
     }
-    info!("args: {:?}", args);
+    info!("load app args: {:?} name: {}", args, name);
     let elf_base_addr = Some(0x400_0000);
     axlog::warn!("The elf base addr may be different in different arch!");
     // let (entry, segments, relocate_pairs) = parse_elf(&elf, elf_base_addr);
@@ -201,6 +201,7 @@ pub fn load_app(
         memory_set.new_region(
             segment.vaddr,
             segment.size,
+            false,
             segment.flags,
             segment.data.as_deref(),
             None,
@@ -220,6 +221,7 @@ pub fn load_app(
     memory_set.new_region(
         heap_start,
         MAX_USER_HEAP_SIZE,
+        false,
         MappingFlags::READ | MappingFlags::WRITE | MappingFlags::USER,
         Some(&heap_data),
         None,
@@ -239,6 +241,7 @@ pub fn load_app(
     memory_set.new_region(
         stack_top,
         stack_size,
+        false,
         MappingFlags::USER | MappingFlags::READ | MappingFlags::WRITE,
         Some(&stack_data),
         None,
@@ -306,7 +309,7 @@ pub fn handle_page_fault(addr: VirtAddr, flags: MappingFlags) {
 /// # Safety
 ///
 /// 保证传入的 ptr 是有效的
-pub unsafe fn wait_pid(pid: isize, exit_code_ptr: *mut i32) -> Result<u64, WaitStatus> {
+pub unsafe fn wait_pid(pid: i32, exit_code_ptr: *mut i32) -> Result<u64, WaitStatus> {
     // 获取当前进程
     let curr_process = current_process();
     let mut exit_task_id: usize = 0;

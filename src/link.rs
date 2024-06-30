@@ -297,24 +297,19 @@ pub fn deal_with_path(
     dir_fd: usize,
     path_addr: Option<*const u8>,
     force_dir: bool,
-) -> Option<FilePath> {
+) -> AxResult<FilePath> {
     let process = current_process();
     let mut path = "".to_string();
     if let Some(path_addr) = path_addr {
         if path_addr.is_null() {
             axlog::warn!("path address is null");
-            return None;
+            return Err(AxError::BadAddress);
         }
-        if process
+        process
             .manual_alloc_for_lazy((path_addr as usize).into())
-            .is_ok()
-        {
-            // 直接访问前需要确保已经被分配
-            path = unsafe { raw_ptr_to_ref_str(path_addr) }.to_string().clone();
-        } else {
-            axlog::warn!("path address is invalid");
-            return None;
-        }
+            .map(|_| {
+                path = unsafe { raw_ptr_to_ref_str(path_addr) }.to_string().clone();
+            })?;
     }
 
     if path.is_empty() {
@@ -328,7 +323,7 @@ pub fn deal_with_path(
             let fd_table = process.fd_manager.fd_table.lock();
             if dir_fd >= fd_table.len() {
                 axlog::warn!("fd index out of range");
-                return None;
+                return Err(AxError::InvalidInput);
             }
             match fd_table[dir_fd].as_ref() {
                 Some(dir) => {
@@ -337,7 +332,7 @@ pub fn deal_with_path(
                 }
                 None => {
                     axlog::warn!("fd not exist");
-                    return None;
+                    return Err(AxError::NotFound);
                 }
             }
         }
@@ -346,22 +341,22 @@ pub fn deal_with_path(
         let fd_table = process.fd_manager.fd_table.lock();
         if dir_fd >= fd_table.len() {
             axlog::warn!("fd index out of range");
-            return None;
+            return Err(AxError::InvalidInput);
         }
         match fd_table[dir_fd].as_ref() {
             Some(dir) => {
                 if dir.get_type() != FileIOType::DirDesc {
                     axlog::warn!("selected fd {} is not a dir", dir_fd);
-                    return None;
+                    return Err(AxError::NotADirectory);
                 }
                 let dir = dir.clone();
                 // 有没有可能dir的尾部一定是一个/号，所以不用手工添加/
                 path = format!("{}{}", dir.get_path(), path);
-                axlog::warn!("handled_path: {}", path);
+                axlog::warn!("handled_path: {} dir: {}", path, dir.get_path());
             }
             None => {
                 axlog::warn!("fd not exist");
-                return None;
+                return Err(AxError::NotFound);
             }
         }
     }
@@ -372,11 +367,5 @@ pub fn deal_with_path(
         // 如果path以.或..结尾, 则加上/告诉FilePath::new它是一个目录
         path = format!("{}/", path);
     }
-    match FilePath::new(path.as_str()) {
-        Ok(path) => Some(path),
-        Err(err) => {
-            axlog::warn!("error when creating FilePath: {:?}", err);
-            None
-        }
-    }
+    FilePath::new(path.as_str())
 }
