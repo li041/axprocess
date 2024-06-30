@@ -147,6 +147,10 @@ impl Process {
         *self.blocked_by_vfork.lock() = value;
     }
 
+    pub fn get_vfork_block(&self) -> bool {
+        *self.blocked_by_vfork.lock()
+    }
+
     /// set the executable file path of the process
     pub fn set_file_path(&self, path: String) {
         let mut file_path = self.file_path.lock();
@@ -309,7 +313,7 @@ impl Process {
             self.memory_set.lock().lock().unmap_user_areas();
         } else {
             let memory_set = Arc::new(Mutex::new(MemorySet::clone_or_err(
-                &self.memory_set.lock().lock(),
+                &mut self.memory_set.lock().lock(),
             )?));
             *self.memory_set.lock() = memory_set;
             self.memory_set.lock().lock().unmap_user_areas();
@@ -422,6 +426,14 @@ impl Process {
             current_task.get_kernel_stack_top().unwrap(),
             &new_trap_frame,
         );
+
+        // release vfork for parent process
+        {
+            let pid2pc = PID2PC.lock();
+            let parent_process = pid2pc.get(&self.get_parent()).unwrap();
+            parent_process.set_vfork_block(false);
+            drop(pid2pc);
+        }
         Ok(())
     }
 
@@ -436,16 +448,12 @@ impl Process {
         ctid: usize,
         sig_child: bool,
     ) -> AxResult<u64> {
-        // if self.tasks.lock().len() > 100 {
-        //     // 任务过多，手动特判结束，用来作为QEMU内存不足的应对方法
-        //     return Err(AxError::NoMemory);
-        // }
         // 是否共享虚拟地址空间
         let new_memory_set = if flags.contains(CloneFlags::CLONE_VM) {
             Mutex::new(Arc::clone(&self.memory_set.lock()))
         } else {
             let memory_set = Arc::new(Mutex::new(MemorySet::clone_or_err(
-                &self.memory_set.lock().lock(),
+                &mut self.memory_set.lock().lock(),
             )?));
 
             {
@@ -673,7 +681,10 @@ impl Process {
         // 判断是否为VFORK
         if flags.contains(CloneFlags::CLONE_VFORK) {
             self.set_vfork_block(true);
-            yield_now_task();
+            // VFORK: TODO: judge when schedule
+            while self.get_vfork_block() {
+                yield_now_task();
+            }
         }
         Ok(return_id)
     }
