@@ -360,6 +360,12 @@ pub fn deal_with_path(
             }
         }
     }
+    if !path.starts_with('/') {
+        // 如果path不是绝对路径, 则加上当前工作目录
+        let cwd = process.get_cwd();
+        assert!(cwd.ends_with('/'));
+        path = format!("{}/{}", cwd, path);
+    }
     if force_dir && !path.ends_with('/') {
         path = format!("{}/", path);
     }
