@@ -87,7 +87,12 @@ pub fn exit_current_task(exit_code: i32) -> ! {
         let parent = process.get_parent();
         if parent != KERNEL_PROCESS_ID {
             // send exit signal
-            send_signal_to_process(parent as isize, exit_signal.unwrap() as isize).unwrap();
+            let signal = if exit_signal.is_some() {
+                exit_signal.unwrap()
+            } else {
+                SignalNo::SIGCHLD
+            };
+            send_signal_to_process(parent as isize, signal as isize).unwrap();
         }
     }
     // clear_child_tid 的值不为 0，则将这个用户地址处的值写为0
