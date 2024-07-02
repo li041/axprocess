@@ -15,6 +15,7 @@ use axhal::time::current_time_nanos;
 use axhal::KERNEL_PROCESS_ID;
 use axlog::{debug, error};
 use axmem::MemorySet;
+use axsignal::signal_no::SignalNo;
 use axsync::Mutex;
 use axtask::{current, new_task, AxTaskRef, Processor, TaskId};
 use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
@@ -262,7 +263,6 @@ impl Process {
             axconfig::TASK_STACK_SIZE,
             new_process.pid(),
             page_table_token,
-            false,
         );
         TID2TASK
             .lock()
@@ -441,15 +441,16 @@ impl Process {
     /// 返回值为新产生的任务的id
     pub fn clone_task(
         &self,
-        flags: CloneFlags,
+        flags: usize,
         stack: Option<usize>,
         ptid: usize,
         tls: usize,
         ctid: usize,
-        sig_child: bool,
+        exit_signal: Option<SignalNo>,
     ) -> AxResult<u64> {
+        let clone_flags = CloneFlags::from_bits((flags & !0x3f) as u32).unwrap();
         // 是否共享虚拟地址空间
-        let new_memory_set = if flags.contains(CloneFlags::CLONE_VM) {
+        let new_memory_set = if clone_flags.contains(CloneFlags::CLONE_VM) {
             Mutex::new(Arc::clone(&self.memory_set.lock()))
         } else {
             let memory_set = Arc::new(Mutex::new(MemorySet::clone_or_err(
@@ -476,7 +477,7 @@ impl Process {
         };
 
         // 在生成新的进程前，需要决定其所属进程是谁
-        let process_id = if flags.contains(CloneFlags::CLONE_THREAD) {
+        let process_id = if clone_flags.contains(CloneFlags::CLONE_THREAD) {
             // 当前clone生成的是线程，那么以self作为进程
             self.pid
         } else {
@@ -484,7 +485,7 @@ impl Process {
             TaskId::new().as_u64()
         };
         // 决定父进程是谁
-        let parent_id = if flags.contains(CloneFlags::CLONE_PARENT) {
+        let parent_id = if clone_flags.contains(CloneFlags::CLONE_PARENT) {
             // 创建兄弟关系，此时以self的父进程作为自己的父进程
             // 理论上不应该创建内核进程的兄弟进程，所以可以直接unwrap
             self.get_parent()
@@ -498,20 +499,21 @@ impl Process {
             axconfig::TASK_STACK_SIZE,
             process_id,
             new_memory_set.lock().lock().page_table_token(),
-            sig_child,
         );
+
+        // When clone a new task, the new task should have the same fs_base as the original task.
+        //
+        // It should be saved in trap frame, but to compatible with Unikernel, we save it in TaskContext.
         #[cfg(target_arch = "x86_64")]
-        if tls == 0 {
-            unsafe {
-                new_task.set_tls_force(axhal::arch::read_thread_pointer());
-            }
+        unsafe {
+            new_task.set_tls_force(axhal::arch::read_thread_pointer());
         }
+
         debug!("new task:{}", new_task.id().as_u64());
         TID2TASK
             .lock()
             .insert(new_task.id().as_u64(), Arc::clone(&new_task));
-
-        let new_handler = if flags.contains(CloneFlags::CLONE_SIGHAND) {
+        let new_handler = if clone_flags.contains(CloneFlags::CLONE_SIGHAND) {
             // let curr_id = current().id().as_u64();
             self.signal_modules
                 .lock()
@@ -532,7 +534,7 @@ impl Process {
             // info!("curr_id: {:X}", (&curr_id as *const _ as usize));
         };
         // 检查是否在父任务中写入当前新任务的tid
-        if flags.contains(CloneFlags::CLONE_PARENT_SETTID)
+        if clone_flags.contains(CloneFlags::CLONE_PARENT_SETTID)
             & self.manual_alloc_for_lazy(ptid.into()).is_ok()
         {
             unsafe {
@@ -541,48 +543,49 @@ impl Process {
         }
         // 若包含CLONE_CHILD_SETTID或者CLONE_CHILD_CLEARTID
         // 则需要把线程号写入到子线程地址空间中tid对应的地址中
-        if flags.contains(CloneFlags::CLONE_CHILD_SETTID)
-            || flags.contains(CloneFlags::CLONE_CHILD_CLEARTID)
+        if clone_flags.contains(CloneFlags::CLONE_CHILD_SETTID)
+            || clone_flags.contains(CloneFlags::CLONE_CHILD_CLEARTID)
         {
-            if flags.contains(CloneFlags::CLONE_CHILD_SETTID) {
+            if clone_flags.contains(CloneFlags::CLONE_CHILD_SETTID) {
                 new_task.set_child_tid(ctid);
             }
 
-            if flags.contains(CloneFlags::CLONE_CHILD_CLEARTID) {
+            if clone_flags.contains(CloneFlags::CLONE_CHILD_CLEARTID) {
                 new_task.set_clear_child_tid(ctid);
             }
 
-            if flags.contains(CloneFlags::CLONE_VM) {
+            if clone_flags.contains(CloneFlags::CLONE_VM) {
                 // 此时地址空间不会发生改变
                 // 在当前地址空间下进行分配
                 if self.manual_alloc_for_lazy(ctid.into()).is_ok() {
                     // 正常分配了地址
                     unsafe {
-                        *(ctid as *mut i32) = if flags.contains(CloneFlags::CLONE_CHILD_SETTID) {
-                            new_task.id().as_u64() as i32
-                        } else {
-                            0
-                        }
+                        *(ctid as *mut i32) =
+                            if clone_flags.contains(CloneFlags::CLONE_CHILD_SETTID) {
+                                new_task.id().as_u64() as i32
+                            } else {
+                                0
+                            }
                     }
                 } else {
                     return Err(AxError::BadAddress);
                 }
             } else {
-                let memory_set_wrapper = self.memory_set.lock();
-                let mut vm = memory_set_wrapper.lock();
                 // 否则需要在新的地址空间中进行分配
+                let memory_set_wrapper = new_memory_set.lock();
+                let mut vm = memory_set_wrapper.lock();
                 if vm.manual_alloc_for_lazy(ctid.into()).is_ok() {
                     // 此时token没有发生改变，所以不能直接解引用访问，需要手动查页表
                     if let Ok((phyaddr, _, _)) = vm.query(ctid.into()) {
                         let vaddr: usize = phys_to_virt(phyaddr).into();
                         // 注意：任何地址都是从free memory分配来的，那么在页表中，free memory一直在页表中，他们的虚拟地址和物理地址一直有偏移的映射关系
                         unsafe {
-                            *(vaddr as *mut i32) = if flags.contains(CloneFlags::CLONE_CHILD_SETTID)
-                            {
-                                new_task.id().as_u64() as i32
-                            } else {
-                                0
-                            }
+                            *(vaddr as *mut i32) =
+                                if clone_flags.contains(CloneFlags::CLONE_CHILD_SETTID) {
+                                    new_task.id().as_u64() as i32
+                                } else {
+                                    0
+                                }
                         }
                         drop(vm);
                     } else {
@@ -600,7 +603,7 @@ impl Process {
         // 若创建的是线程，则返回线程的id
         let return_id: u64;
         // 决定是创建线程还是进程
-        if flags.contains(CloneFlags::CLONE_THREAD) {
+        if clone_flags.contains(CloneFlags::CLONE_THREAD) {
             // // 若创建的是线程，那么不用新建进程
             // info!("task len: {}", inner.tasks.len());
             // info!("task address :{:X}", (&new_task as *const _ as usize));
@@ -610,10 +613,15 @@ impl Process {
             // );
             self.tasks.lock().push(Arc::clone(&new_task));
 
-            self.signal_modules.lock().insert(
-                new_task.id().as_u64(),
-                SignalModule::init_signal(Some(new_handler)),
-            );
+            let mut signal_module = SignalModule::init_signal(Some(new_handler));
+            // exit signal, default to be SIGCHLD
+            if exit_signal.is_some() {
+                signal_module.set_exit_signal(exit_signal.unwrap());
+            }
+            self.signal_modules
+                .lock()
+                .insert(new_task.id().as_u64(), signal_module);
+
             self.robust_list
                 .lock()
                 .insert(new_task.id().as_u64(), FutexRobustList::default());
@@ -632,20 +640,31 @@ impl Process {
             PID2PC.lock().insert(process_id, Arc::clone(&new_process));
             new_process.tasks.lock().push(Arc::clone(&new_task));
             // 若是新建了进程，那么需要把进程的父子关系进行记录
-
-            new_process.signal_modules.lock().insert(
-                new_task.id().as_u64(),
-                SignalModule::init_signal(Some(new_handler)),
-            );
+            let mut signal_module = SignalModule::init_signal(Some(new_handler));
+            // exit signal, default to be SIGCHLD
+            if exit_signal.is_some() {
+                signal_module.set_exit_signal(exit_signal.unwrap());
+            }
+            new_process
+                .signal_modules
+                .lock()
+                .insert(new_task.id().as_u64(), signal_module);
 
             new_process
                 .robust_list
                 .lock()
                 .insert(new_task.id().as_u64(), FutexRobustList::default());
             return_id = new_process.pid;
-            self.children.lock().push(new_process);
+            PID2PC
+                .lock()
+                .get_mut(&parent_id)
+                .unwrap()
+                .children
+                .lock()
+                .push(Arc::clone(&new_process));
         };
-        if !flags.contains(CloneFlags::CLONE_THREAD) {
+
+        if !clone_flags.contains(CloneFlags::CLONE_THREAD) {
             new_task.set_leader(true);
         }
         let current_task = current();
@@ -656,7 +675,7 @@ impl Process {
         // drop(current_task);
         // 新开的进程/线程返回值为0
         trap_frame.set_ret_code(0);
-        if flags.contains(CloneFlags::CLONE_SETTLS) {
+        if clone_flags.contains(CloneFlags::CLONE_SETTLS) {
             #[cfg(not(target_arch = "x86_64"))]
             trap_frame.set_tls(tls);
             #[cfg(target_arch = "x86_64")]
@@ -679,7 +698,7 @@ impl Process {
         write_trapframe_to_kstack(new_task.get_kernel_stack_top().unwrap(), &trap_frame);
         Processor::first_add_task(new_task);
         // 判断是否为VFORK
-        if flags.contains(CloneFlags::CLONE_VFORK) {
+        if clone_flags.contains(CloneFlags::CLONE_VFORK) {
             self.set_vfork_block(true);
             // VFORK: TODO: judge when schedule
             while self.get_vfork_block() {
@@ -734,6 +753,11 @@ impl Process {
     /// 获取当前进程的工作目录
     pub fn get_cwd(&self) -> String {
         self.fd_manager.cwd.lock().clone()
+    }
+
+    /// Set the current working directory of the process
+    pub fn set_cwd(&self, cwd: String) {
+        *self.fd_manager.cwd.lock() = cwd;
     }
 }
 

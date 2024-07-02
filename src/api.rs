@@ -76,12 +76,18 @@ pub fn exit_current_task(exit_code: i32) -> ! {
         current_task.is_leader(),
     );
     // 检查这个任务是否有sig_child信号
+    let exit_signal = process
+        .signal_modules
+        .lock()
+        .get(&curr_id)
+        .unwrap()
+        .get_exit_signal();
 
-    if current_task.get_sig_child() || current_task.is_leader() {
+    if exit_signal.is_some() || current_task.is_leader() {
         let parent = process.get_parent();
         if parent != KERNEL_PROCESS_ID {
-            // 发送sigchild
-            send_signal_to_process(parent as isize, 17).unwrap();
+            // send exit signal
+            send_signal_to_process(parent as isize, exit_signal.unwrap() as isize).unwrap();
         }
     }
     // clear_child_tid 的值不为 0，则将这个用户地址处的值写为0
@@ -316,7 +322,10 @@ pub unsafe fn wait_pid(pid: i32, exit_code_ptr: *mut i32) -> Result<u64, WaitSta
     let mut answer_id: u64 = 0;
     let mut answer_status = WaitStatus::NotExist;
     for (index, child) in curr_process.children.lock().iter().enumerate() {
-        if pid == -1 {
+        if pid <= 0 {
+            if pid == 0 {
+                axlog::warn!("Don't support for process group.");
+            }
             // 任意一个进程结束都可以的
             answer_status = WaitStatus::Running;
             if let Some(exit_code) = child.get_code_if_exit() {

@@ -9,10 +9,10 @@ use axhal::{
 };
 use axlog::{info, warn};
 use axsignal::{
-    action::{SigActionFlags, SignalDefault, SIG_IGN},
+    action::{SigActionFlags, SignalDefault, SIG_DFL, SIG_IGN},
     info::SigInfo,
     signal_no::SignalNo,
-    ucontext::SignalUserContext,
+    ucontext::{SignalStack, SignalUserContext},
     SignalHandler, SignalSet,
 };
 use axsync::Mutex;
@@ -27,6 +27,10 @@ pub struct SignalModule {
     pub signal_handler: Arc<Mutex<SignalHandler>>,
     /// 未决信号集
     pub signal_set: SignalSet,
+    /// exit signal
+    exit_signal: Option<SignalNo>,
+    /// Alternative signal stack
+    pub alternate_stack: SignalStack,
 }
 
 impl SignalModule {
@@ -42,6 +46,8 @@ impl SignalModule {
             last_trap_frame_for_signal,
             signal_handler,
             signal_set,
+            exit_signal: None,
+            alternate_stack: SignalStack::default(),
         }
     }
 
@@ -53,21 +59,23 @@ impl SignalModule {
     /// - Some(false): The interrupted syscall should not be restarted
     pub fn have_restart_signal(&self) -> Option<bool> {
         match self.signal_set.find_signal() {
-            Some(sig_num) => match self.signal_handler.lock().get_action(sig_num) {
-                Some(action) => {
-                    if action.need_restart() {
-                        Some(true)
-                    } else {
-                        Some(false)
-                    }
-                }
-                None => {
-                    axlog::error!("No action for signal {}", sig_num);
-                    None
-                }
-            },
+            Some(sig_num) => Some(
+                self.signal_handler
+                    .lock()
+                    .get_action(sig_num)
+                    .need_restart(),
+            ),
+
             None => None,
         }
+    }
+
+    pub fn set_exit_signal(&mut self, signal: SignalNo) {
+        self.exit_signal = Some(signal);
+    }
+
+    pub fn get_exit_signal(&self) -> Option<SignalNo> {
+        self.exit_signal
     }
 }
 
@@ -192,7 +200,7 @@ pub fn handle_signals() {
     // 调取处理函数
     let signal_handler = signal_module.signal_handler.lock();
     let action = signal_handler.get_action(sig_num);
-    if action.is_none() {
+    if action.sa_handler == SIG_DFL {
         drop(signal_handler);
         drop(signal_modules);
         // 未显式指定处理函数，使用默认处理函数
@@ -216,7 +224,6 @@ pub fn handle_signals() {
         }
         return;
     }
-    let action = action.unwrap();
     if action.sa_handler == SIG_IGN {
         // 忽略处理
         return;
@@ -232,7 +239,17 @@ pub fn handle_signals() {
     let mut trap_frame = read_trapframe_from_kstack(current_task.get_kernel_stack_top().unwrap());
 
     // // 新的trap上下文的sp指针位置，由于SIGINFO会存放内容，所以需要开个保护区域
-    let mut sp = trap_frame.get_sp() - USER_SIGNAL_PROTECT;
+    let mut sp = if action.sa_flags.contains(SigActionFlags::SA_ONSTACK)
+        && signal_module.alternate_stack.flags != axsignal::ucontext::SS_DISABLE
+    {
+        axlog::debug!("Use alternate stack");
+        // Use alternate stack
+        (signal_module.alternate_stack.sp + signal_module.alternate_stack.size - 1) & !0xf
+    } else {
+        trap_frame.get_sp() - USER_SIGNAL_PROTECT
+    };
+
+    info!("use stack: {:#x}", sp);
     let restorer = if let Some(addr) = action.get_storer() {
         addr
     } else {
