@@ -47,6 +47,9 @@ pub struct Process {
     /// 父进程号
     pub parent: AtomicU64,
 
+    /// 栈大小
+    pub stack_size: AtomicU64,
+
     /// 子进程
     pub children: Mutex<Vec<Arc<Process>>>,
 
@@ -91,6 +94,18 @@ impl Process {
     /// get the process id
     pub fn pid(&self) -> u64 {
         self.pid
+    }
+
+    /// TODO: 改变了新创建的任务栈大小，但未实现当前任务的栈扩展
+    /// set stack size
+    pub fn set_stack_limit(&self, limit: u64) {
+        self.stack_size
+            .store(limit, Ordering::Release)
+    }
+
+    /// get stack size
+    pub fn get_stack_limit(&self) -> u64 {
+        self.stack_size.load(Ordering::Acquire)
     }
 
     /// get the parent process id
@@ -177,6 +192,7 @@ impl Process {
     /// 创建一个新的进程
     pub fn new(
         pid: u64,
+        stack_size: u64,
         parent: u64,
         memory_set: Mutex<Arc<Mutex<MemorySet>>>,
         heap_bottom: u64,
@@ -184,6 +200,7 @@ impl Process {
     ) -> Self {
         Self {
             pid,
+            stack_size: AtomicU64::new(stack_size),
             parent: AtomicU64::new(parent),
             children: Mutex::new(Vec::new()),
             tasks: Mutex::new(Vec::new()),
@@ -238,6 +255,7 @@ impl Process {
             };
         let new_process = Arc::new(Self::new(
             TaskId::new().as_u64(),
+            axconfig::TASK_STACK_SIZE as u64,
             KERNEL_PROCESS_ID,
             Mutex::new(Arc::new(Mutex::new(memory_set))),
             heap_bottom.as_usize() as u64,
@@ -260,7 +278,7 @@ impl Process {
         let new_task = new_task(
             || {},
             path,
-            axconfig::TASK_STACK_SIZE,
+            new_process.get_stack_limit() as usize,
             new_process.pid(),
             page_table_token,
         );
@@ -496,7 +514,7 @@ impl Process {
         let new_task = new_task(
             || {},
             String::from(self.tasks.lock()[0].name().split('/').last().unwrap()),
-            axconfig::TASK_STACK_SIZE,
+            self.get_stack_limit() as usize,
             process_id,
             new_memory_set.lock().lock().page_table_token(),
         );
@@ -631,6 +649,7 @@ impl Process {
             // 由于地址空间是复制的，所以堆底的地址也一定相同
             let new_process = Arc::new(Process::new(
                 process_id,
+                self.get_stack_limit(),
                 parent_id,
                 new_memory_set,
                 self.get_heap_bottom(),
