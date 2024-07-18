@@ -26,6 +26,7 @@ use elf_parser::{
 use xmas_elf::program::SegmentData;
 
 use crate::flags::WaitStatus;
+use crate::futex::futex_wake;
 use crate::link::real_path;
 use crate::process::{Process, PID2PC, TID2TASK};
 
@@ -96,6 +97,7 @@ pub fn exit_current_task(exit_code: i32) -> ! {
         {
             unsafe {
                 *(clear_child_tid as *mut i32) = 0;
+                let _ = futex_wake(clear_child_tid.into(), 0, 1);
             }
         }
     }
