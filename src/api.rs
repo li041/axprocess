@@ -36,6 +36,7 @@ use crate::signal::{send_signal_to_process, send_signal_to_thread};
 pub fn init_kernel_process() {
     let kernel_process = Arc::new(Process::new(
         TaskId::new().as_u64(),
+        axconfig::TASK_STACK_SIZE as u64,
         0,
         Mutex::new(Arc::new(Mutex::new(MemorySet::new_empty()))),
         0,
