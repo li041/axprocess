@@ -26,7 +26,7 @@ use elf_parser::{
 use xmas_elf::program::SegmentData;
 
 use crate::flags::WaitStatus;
-use crate::futex::clear_wait;
+use crate::futex::futex_wake;
 use crate::link::real_path;
 use crate::process::{Process, PID2PC, TID2TASK};
 
@@ -68,14 +68,6 @@ pub fn exit_current_task(exit_code: i32) -> ! {
     let curr_id = current_task.id().as_u64();
 
     info!("exit task id {} with code _{}_", curr_id, exit_code);
-    clear_wait(
-        if current_task.is_leader() {
-            process.pid()
-        } else {
-            curr_id
-        },
-        current_task.is_leader(),
-    );
     // 检查这个任务是否有sig_child信号
     let exit_signal = process
         .signal_modules
@@ -106,6 +98,7 @@ pub fn exit_current_task(exit_code: i32) -> ! {
         {
             unsafe {
                 *(clear_child_tid as *mut i32) = 0;
+                let _ = futex_wake(clear_child_tid.into(), 0, 1);
             }
         }
     }
