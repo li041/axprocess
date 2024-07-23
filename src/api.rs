@@ -14,7 +14,7 @@ use axhal::mem::VirtAddr;
 use axhal::paging::MappingFlags;
 use axhal::time::{current_time_nanos, NANOS_PER_MICROS, NANOS_PER_SEC};
 use axhal::KERNEL_PROCESS_ID;
-use axlog::{debug, info};
+use axlog::{debug, info, warn};
 use axmem::MemorySet;
 
 use axsignal::signal_no::SignalNo;
@@ -175,10 +175,10 @@ pub fn load_app(
         ans
     } else {
         // exit(0)
+        debug!("App not found: {}", name);
         return Err(AxError::NotFound);
     };
     let elf = xmas_elf::ElfFile::new(&elf_data).expect("Error parsing app ELF file.");
-    debug!("app elf data length: {}", elf_data.len());
     if let Some(interp) = elf
         .program_iter()
         .find(|ph| ph.get_type() == Ok(xmas_elf::program::Type::Interp))
@@ -197,7 +197,7 @@ pub fn load_app(
     }
     info!("load app args: {:?} name: {}", args, name);
     let elf_base_addr = Some(0x400_0000);
-    axlog::warn!("The elf base addr may be different in different arch!");
+    warn!("The elf base addr may be different in different arch!");
     // let (entry, segments, relocate_pairs) = parse_elf(&elf, elf_base_addr);
     let entry = get_elf_entry(&elf, elf_base_addr);
     let segments = get_elf_segments(&elf, elf_base_addr);
