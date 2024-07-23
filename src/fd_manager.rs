@@ -27,7 +27,7 @@ impl FdManager {
             fd_table: Mutex::new(fd_table),
             limit: AtomicU64::new(limit as u64),
             umask: AtomicI32::new(0o022),
-            cwd: Mutex::new(String::from("/")),
+            cwd: Mutex::new(String::from("./")),
         }
     }
 
