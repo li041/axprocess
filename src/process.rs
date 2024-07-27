@@ -655,6 +655,8 @@ impl Process {
                 self.get_heap_bottom(),
                 self.fd_manager.fd_table.lock().clone(),
             ));
+            // 复制当前工作文件夹
+            new_process.set_cwd(self.get_cwd());
             // 记录该进程，防止被回收
             PID2PC.lock().insert(process_id, Arc::clone(&new_process));
             new_process.tasks.lock().push(Arc::clone(&new_task));

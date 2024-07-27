@@ -150,8 +150,6 @@ pub fn futex_wake(vaddr: VirtAddr, flags: i32, nr_waken: u32) -> AxSyscallResult
     }
     // drop hash_bucket to avoid deadlock 
     drop(hash_bucket);
-    yield_now_task();
-    info!("[futex_wake] wake up {:?} tasks", ret);
     Ok(ret as isize)
 }
 
@@ -181,7 +179,6 @@ pub fn futex_wake_bitset(vaddr: VirtAddr, flags: i32, nr_waken: u32, bitset: u32
     }
     // drop hash_bucket to avoid deadlock 
     drop(hash_bucket);
-    yield_now_task();
     Ok(ret as isize)
 }
 
@@ -226,6 +223,5 @@ pub fn futex_requeue(uaddr: VirtAddr, flags: i32, nr_waken: u32, uaddr2: VirtAdd
         }
     }
     drop(hash_bucket);
-    yield_now_task();
     Ok(ret as isize)
 }
