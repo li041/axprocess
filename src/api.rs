@@ -17,6 +17,7 @@ use axhal::KERNEL_PROCESS_ID;
 use axlog::{debug, info, warn};
 use axmem::MemorySet;
 
+use core::sync::atomic::AtomicI32;
 use axsignal::signal_no::SignalNo;
 use axsync::Mutex;
 use axtask::{current, current_processor, yield_now, AxTaskRef, CurrentTask, TaskId, TaskState};
@@ -41,6 +42,8 @@ pub fn init_kernel_process() {
         Mutex::new(Arc::new(Mutex::new(MemorySet::new_empty()))),
         0,
         vec![],
+        Arc::new(Mutex::new(String::from("./").into())),
+        Arc::new(AtomicI32::new(0o022)),
     ));
 
     axtask::init_scheduler();
