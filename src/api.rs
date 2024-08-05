@@ -108,7 +108,8 @@ pub fn exit_current_task(exit_code: i32) -> ! {
             for task in process.tasks.lock().deref() {
                 if !task.is_leader() && task.state() != TaskState::Exited {
                     all_exited = false;
-                    break;
+                    send_signal_to_thread(task.id().as_u64() as isize, SignalNo::SIGKILL as isize)
+                        .unwrap();
                 }
             }
             if !all_exited {
@@ -287,13 +288,7 @@ pub fn time_stat_output() -> (usize, usize, usize, usize) {
 
 /// To deal with the page fault
 pub fn handle_page_fault(addr: VirtAddr, flags: MappingFlags) {
-    axlog::debug!("'page fault' addr: {:?}, flags: {:?}", addr, flags);
     let current_process = current_process();
-    axlog::debug!(
-        "memory token : {:#x}",
-        current_process.memory_set.lock().lock().page_table_token()
-    );
-
     if current_process
         .memory_set
         .lock()

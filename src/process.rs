@@ -99,8 +99,7 @@ impl Process {
     /// TODO: 改变了新创建的任务栈大小，但未实现当前任务的栈扩展
     /// set stack size
     pub fn set_stack_limit(&self, limit: u64) {
-        self.stack_size
-            .store(limit, Ordering::Release)
+        self.stack_size.store(limit, Ordering::Release)
     }
 
     /// get stack size
