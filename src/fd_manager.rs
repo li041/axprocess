@@ -17,17 +17,17 @@ pub struct FdManager {
     /// 保存文件描述符的数组的最大长度
     pub limit: AtomicU64,
     /// 创建文件时的mode的掩码
-    umask: AtomicI32,
-    pub cwd: Mutex<String>,
+    pub umask: Arc<AtomicI32>,
+    pub cwd: Arc<Mutex<String>>,
 }
 
 impl FdManager {
-    pub fn new(fd_table: Vec<Option<Arc<dyn FileIO>>>, limit: usize) -> Self {
+    pub fn new(fd_table: Vec<Option<Arc<dyn FileIO>>>, cwd_src: Arc<Mutex<String>>, mask_src: Arc<AtomicI32>, limit: usize) -> Self {
         Self {
             fd_table: Mutex::new(fd_table),
             limit: AtomicU64::new(limit as u64),
-            umask: AtomicI32::new(0o022),
-            cwd: Mutex::new(String::from("/")),
+            umask: mask_src,
+            cwd: cwd_src,
         }
     }
 
