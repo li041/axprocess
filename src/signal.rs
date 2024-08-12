@@ -342,6 +342,25 @@ pub fn signal_return() -> isize {
     }
 }
 
+// not fully implemented, Starry doesn't support pgid , send to all threads now
+pub fn send_signal_to_pg(signum: isize) -> AxResult<()> {
+    let pid2pc = PID2PC.lock();
+    for (_, process) in pid2pc.iter().rev() {
+        let mut signal_modules = process.signal_modules.lock();
+
+        for (now_id, signal_module) in signal_modules.iter_mut() { 
+                signal_module.signal_set.try_add_signal(signum as usize);
+                let tid2task = TID2TASK.lock();
+                let main_task = Arc::clone(tid2task.get(&now_id).unwrap());
+                // 如果这个时候对应的线程是处于休眠状态的，则唤醒之，进入信号处理阶段
+                if main_task.is_blocked() {
+                    axtask::wakeup_task(main_task);
+                }
+            }
+        }
+    Ok(())
+}
+
 /// 发送信号到指定的进程
 ///
 /// 默认发送到该进程下的主线程

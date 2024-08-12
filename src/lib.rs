@@ -14,3 +14,5 @@ mod stdio;
 mod fd_manager;
 
 pub mod signal;
+#[cfg(target_arch = "aarch64")]
+pub mod tty;
