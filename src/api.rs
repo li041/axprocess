@@ -14,13 +14,13 @@ use axhal::mem::VirtAddr;
 use axhal::paging::MappingFlags;
 use axhal::time::{current_time_nanos, NANOS_PER_MICROS, NANOS_PER_SEC};
 use axhal::KERNEL_PROCESS_ID;
-use axlog::{debug, info, warn};
+use axlog::{info, warn};
 use axmem::MemorySet;
 
-use core::sync::atomic::AtomicI32;
 use axsignal::signal_no::SignalNo;
 use axsync::Mutex;
 use axtask::{current, current_processor, yield_now, AxTaskRef, CurrentTask, TaskId, TaskState};
+use core::sync::atomic::AtomicI32;
 use elf_parser::{
     get_app_stack_region, get_auxv_vector, get_elf_entry, get_elf_segments, get_relocate_pairs,
 };
@@ -41,9 +41,9 @@ pub fn init_kernel_process() {
         0,
         Mutex::new(Arc::new(Mutex::new(MemorySet::new_empty()))),
         0,
-        vec![],
         Arc::new(Mutex::new(String::from("/").into())),
         Arc::new(AtomicI32::new(0o022)),
+        Arc::new(Mutex::new(vec![])),
     ));
 
     axtask::init_scheduler();
@@ -88,7 +88,7 @@ pub fn exit_current_task(exit_code: i32) -> ! {
             } else {
                 SignalNo::SIGCHLD
             };
-            send_signal_to_process(parent as isize, signal as isize).unwrap();
+            send_signal_to_process(parent as isize, signal as isize, None).unwrap();
         }
     }
     // clear_child_tid 的值不为 0，则将这个用户地址处的值写为0
@@ -179,7 +179,7 @@ pub fn load_app(
         ans
     } else {
         // exit(0)
-        debug!("App not found: {}", name);
+        info!("App not found: {}", name);
         return Err(AxError::NotFound);
     };
     let elf = xmas_elf::ElfFile::new(&elf_data).expect("Error parsing app ELF file.");
